@@ -1,6 +1,6 @@
 // @flow
-import { keyboardKeys } from './keyboard-keys';
 import { ALT_SYM, CTRL_SYM, isMac, META_SYM, SHIFT_SYM } from './constants';
+import { keyboardKeys } from './keyboard-keys';
 
 /**
  * The readable definition of a hotkey.
@@ -156,6 +156,8 @@ export const hotKeyRefs = {
   CLOSE_MODAL: defineHotKey('closeModal', 'Close Modal'),
 
   ENVIRONMENT_UNCOVER_VARIABLES: defineHotKey('environment_uncoverVariables', 'Uncover Variables'),
+
+  RELOAD_YAML_ENVIRONMENT: defineHotKey('reloadYamlEnvironment', 'Reload YAML Environment'),
 };
 
 /**
@@ -200,6 +202,11 @@ const defaultRegistry: HotKeyRegistry = {
   [hotKeyRefs.SHOW_RECENT_REQUESTS_PREVIOUS.id]: keyBinds(
     keyComb(true, false, true, false, keyboardKeys.tab.keyCode),
     keyComb(true, false, true, false, keyboardKeys.tab.keyCode),
+  ),
+
+  [hotKeyRefs.RELOAD_YAML_ENVIRONMENT.id]: keyBinds(
+    keyComb(false, false, true, true, keyboardKeys.period.keyCode),
+    keyComb(false, false, true, true, keyboardKeys.period.keyCode),
   ),
 
   [hotKeyRefs.PLUGIN_RELOAD.id]: keyBinds(

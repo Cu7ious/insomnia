@@ -1,19 +1,17 @@
-import React, { PureComponent } from 'react';
-import PropTypes from 'prop-types';
 import autobind from 'autobind-decorator';
-import fs from 'fs';
 import { clipboard, ipcRenderer, remote } from 'electron';
-import { parse as urlParse } from 'url';
+import fs from 'fs';
 import HTTPSnippet from 'httpsnippet';
+import * as mime from 'mime-types';
+import * as path from 'path';
+import PropTypes from 'prop-types';
+import React, { PureComponent } from 'react';
 import ReactDOM from 'react-dom';
 import { connect } from 'react-redux';
 import { bindActionCreators } from 'redux';
-import Wrapper from '../components/wrapper';
-import WorkspaceEnvironmentsEditModal from '../components/modals/workspace-environments-edit-modal';
-import Toast from '../components/toast';
-import CookiesModal from '../components/modals/cookies-modal';
-import RequestSwitcherModal from '../components/modals/request-switcher-modal';
-import SettingsModal, { TAB_INDEX_SHORTCUTS } from '../components/modals/settings-modal';
+import { parse as urlParse } from 'url';
+import YAML from 'yaml';
+
 import {
   COLLAPSE_SIDEBAR_REMS,
   DEFAULT_PANE_HEIGHT,
@@ -27,9 +25,41 @@ import {
   MIN_SIDEBAR_REMS,
   PREVIEW_MODE_SOURCE,
 } from '../../common/constants';
-import * as globalActions from '../redux/modules/global';
 import * as db from '../../common/database';
+import { exportHarRequest } from '../../common/har';
+import { hotKeyRefs } from '../../common/hotkeys';
+import { executeHotKey } from '../../common/hotkeys-listener';
+import { debounce, getContentDispositionHeader, getDataDirectory } from '../../common/misc';
+import * as render from '../../common/render';
 import * as models from '../../models';
+import { environment } from '../../models';
+import { updateMimeType } from '../../models/request';
+import * as network from '../../network/network';
+import * as plugins from '../../plugins';
+import * as themes from '../../plugins/misc';
+import FileSystemDriver from '../../sync/store/drivers/file-system-driver';
+import VCS from '../../sync/vcs';
+import * as templating from '../../templating';
+import { getKeys } from '../../templating/utils';
+import ErrorBoundary from '../components/error-boundary';
+import KeydownBinder from '../components/keydown-binder';
+import { showAlert, showModal, showPrompt } from '../components/modals';
+import AskModal from '../components/modals/ask-modal';
+import CookiesModal from '../components/modals/cookies-modal';
+import ExportRequestsModal from '../components/modals/export-requests-modal';
+import GenerateCodeModal from '../components/modals/generate-code-modal';
+import MoveRequestGroupModal from '../components/modals/move-request-group-modal';
+import RequestCreateModal from '../components/modals/request-create-modal';
+import RequestRenderErrorModal from '../components/modals/request-render-error-modal';
+import RequestSettingsModal from '../components/modals/request-settings-modal';
+import RequestSwitcherModal from '../components/modals/request-switcher-modal';
+import SettingsModal, { TAB_INDEX_SHORTCUTS } from '../components/modals/settings-modal';
+import SyncMergeModal from '../components/modals/sync-merge-modal';
+import WorkspaceEnvironmentsEditModal from '../components/modals/workspace-environments-edit-modal';
+import WorkspaceSettingsModal from '../components/modals/workspace-settings-modal';
+import Toast from '../components/toast';
+import Wrapper from '../components/wrapper';
+import * as globalActions from '../redux/modules/global';
 import {
   selectActiveCookieJar,
   selectActiveOAuth2Token,
@@ -46,33 +76,9 @@ import {
   selectUnseenWorkspaces,
   selectWorkspaceRequestsAndRequestGroups,
 } from '../redux/selectors';
-import RequestCreateModal from '../components/modals/request-create-modal';
-import GenerateCodeModal from '../components/modals/generate-code-modal';
-import WorkspaceSettingsModal from '../components/modals/workspace-settings-modal';
-import RequestSettingsModal from '../components/modals/request-settings-modal';
-import RequestRenderErrorModal from '../components/modals/request-render-error-modal';
-import * as network from '../../network/network';
-import { debounce, getContentDispositionHeader, getDataDirectory } from '../../common/misc';
-import * as mime from 'mime-types';
-import * as path from 'path';
-import * as render from '../../common/render';
-import { getKeys } from '../../templating/utils';
-import { showAlert, showModal, showPrompt } from '../components/modals/index';
-import { exportHarRequest } from '../../common/har';
-import { hotKeyRefs } from '../../common/hotkeys';
-import { executeHotKey } from '../../common/hotkeys-listener';
-import KeydownBinder from '../components/keydown-binder';
-import ErrorBoundary from '../components/error-boundary';
-import * as plugins from '../../plugins';
-import * as templating from '../../templating/index';
-import AskModal from '../components/modals/ask-modal';
-import { updateMimeType } from '../../models/request';
-import MoveRequestGroupModal from '../components/modals/move-request-group-modal';
-import * as themes from '../../plugins/misc';
-import ExportRequestsModal from '../components/modals/export-requests-modal';
-import FileSystemDriver from '../../sync/store/drivers/file-system-driver';
-import VCS from '../../sync/vcs';
-import SyncMergeModal from '../components/modals/sync-merge-modal';
+
+const WORKSPACE_YAML_CONFIG = 'code/devsite/golympus/insomnia/config.yaml';
+const WORKSPACE_YAML_CONFIG = 'code/devsite/golympus/insomnia/config.yaml';
 
 @autobind
 class App extends PureComponent {
@@ -244,6 +250,59 @@ class App extends PureComponent {
           );
 
           await this._handleSetRequestPinned(this.props.activeRequest, !(metas && metas.pinned));
+        },
+      ],
+      [
+        hotKeyRefs.RELOAD_YAML_ENVIRONMENT,
+        async () => {
+          console.log('CMD-SHIFT-. was pressed!');
+
+          const { activeWorkspace } = this.props;
+          const baseEnv = await environment.getOrCreateForWorkspaceId(activeWorkspace._id);
+
+          if (!baseEnv) {
+            await showAlert({
+              title: 'Problem reloading config file!',
+              message: (
+                <span>
+                  <pre>YAML Config wasn't reloaded.</pre>
+                </span>
+              ),
+            });
+            return;
+          }
+
+          const patch = {};
+          fs.readFile(process.env.HOME + '/' + WORKSPACE_YAML_CONFIG, async (err, data) => {
+            if (err) {
+              await showAlert({
+                title: 'Problem reloading config file!',
+                message: (
+                  <span>
+                    <pre>YAML Config wasn't reloaded.</pre>
+                  </span>
+                ),
+              });
+              return;
+            }
+
+            const rawYAML = data.toString();
+
+            patch.data = YAML.parse(rawYAML);
+
+            console.log(patch.data);
+
+            console.log('environment was updated', await environment.update(baseEnv, patch));
+
+            await showAlert({
+              title: 'Config file was reloaded!',
+              message: (
+                <span>
+                  <pre>{JSON.stringify(patch.data, null, 2)}</pre>
+                </span>
+              ),
+            });
+          });
         },
       ],
       [hotKeyRefs.PLUGIN_RELOAD, this._handleReloadPlugins],
@@ -427,6 +486,10 @@ class App extends PureComponent {
 
   _updateIsVariableUncovered() {
     this.setState({ isVariableUncovered: !this.state.isVariableUncovered });
+  }
+
+  _handleSetYAMLReload() {
+    this.setState({ showYAMLModal: !this.state.showYAMLModal });
   }
 
   _handleSetPaneWidth(paneWidth) {

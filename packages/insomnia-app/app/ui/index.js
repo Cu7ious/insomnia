@@ -1,19 +1,21 @@
-import * as React from 'react';
-import * as packageJson from '../../package.json';
-import ReactDOM from 'react-dom';
-import { Provider } from 'react-redux';
-import App from './containers/app';
-import * as models from '../models';
-import * as db from '../common/database';
-import { init as initStore } from './redux/modules';
-import * as legacySync from '../sync-legacy';
-import { init as initPlugins } from '../plugins';
 import './css/index.less';
-import { isDevelopment } from '../common/constants';
-import { setFont, setTheme } from '../plugins/misc';
-import { AppContainer } from 'react-hot-loader';
+
+import * as React from 'react';
 import { DragDropContext } from 'react-dnd';
+import ReactDOM from 'react-dom';
+import { AppContainer } from 'react-hot-loader';
+import { Provider } from 'react-redux';
+
+import * as packageJson from '../../package.json';
+import { isDevelopment } from '../common/constants';
+import * as db from '../common/database';
+import * as models from '../models';
+import { init as initPlugins } from '../plugins';
+import { setFont, setTheme } from '../plugins/misc';
+import * as legacySync from '../sync-legacy';
+import App from './containers/app';
 import DNDBackend from './dnd-backend';
+import { init as initStore } from './redux/modules';
 
 // Handy little helper
 document.body.setAttribute('data-platform', process.platform);
